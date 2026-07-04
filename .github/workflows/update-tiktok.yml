@@ -25,7 +25,7 @@ jobs:
           python-version: "3.11"
 
       - name: Instalar dependencias
-        run: pip install requests
+        run: pip install requests yt-dlp
 
       - name: Leer datos públicos de TikTok
         run: python scripts/update_tiktok_data.py

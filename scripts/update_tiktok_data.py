@@ -17,6 +17,7 @@ los últimos datos válidos en vez de romperse.
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -80,7 +81,9 @@ def find_user_module(data: dict) -> dict:
 def find_recent_video_ids(data: dict, limit: int = 6) -> list:
     """Intenta extraer los IDs de los videos más recientes desde el módulo
     de la lista de publicaciones del usuario, si está presente en esta carga
-    de página (TikTok no siempre incluye la lista completa en el HTML inicial)."""
+    de página (TikTok no siempre incluye la lista completa en el HTML inicial).
+    Este método es un respaldo secundario; el método principal es yt-dlp,
+    ver get_recent_video_ids_via_ytdlp()."""
     try:
         default_scope = data["__DEFAULT_SCOPE__"]
         item_list = default_scope.get("webapp.user-detail", {}).get("itemList", [])
@@ -90,12 +93,67 @@ def find_recent_video_ids(data: dict, limit: int = 6) -> list:
         return []
 
 
+def get_recent_video_ids_via_ytdlp(limit: int = 6) -> list:
+    """Usa yt-dlp (herramienta externa, mantenida activamente para seguir
+    funcionando con los cambios de TikTok/YouTube/etc) para listar los
+    videos más recientes del perfil, sin descargar ningún video, solo
+    metadatos en formato JSON (--flat-playlist --dump-json).
+
+    Devuelve una lista vacía si yt-dlp no está disponible o falla, para que
+    el llamador pueda usar el método de respaldo."""
+    try:
+        proc = subprocess.run(
+            [
+                "yt-dlp",
+                "--flat-playlist",
+                "--dump-json",
+                f"--playlist-end={limit}",
+                "--no-warnings",
+                PROFILE_URL,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        if proc.returncode != 0:
+            print(f"yt-dlp terminó con código {proc.returncode}: {proc.stderr[:500]}", file=sys.stderr)
+            return []
+
+        ids = []
+        for line in proc.stdout.strip().splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            video_id = entry.get("id")
+            if video_id:
+                ids.append(str(video_id))
+        return ids[:limit]
+
+    except FileNotFoundError:
+        print("yt-dlp no está instalado en este entorno.", file=sys.stderr)
+        return []
+    except subprocess.TimeoutExpired:
+        print("yt-dlp tardó demasiado y se canceló.", file=sys.stderr)
+        return []
+    except Exception as err:
+        print(f"Error inesperado ejecutando yt-dlp: {err}", file=sys.stderr)
+        return []
+
+
 def main():
     try:
         html = fetch_html(PROFILE_URL)
         data = extract_json_blob(html)
         stats = find_user_module(data)
-        video_ids = find_recent_video_ids(data)
+
+        # Método principal para los videos: yt-dlp (más confiable).
+        video_ids = get_recent_video_ids_via_ytdlp()
+        if not video_ids:
+            print("yt-dlp no devolvió videos, probando método de respaldo...", file=sys.stderr)
+            video_ids = find_recent_video_ids(data)
 
         result = {
             "followers": int(stats.get("followerCount", 0)),
