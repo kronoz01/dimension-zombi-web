@@ -1,0 +1,39 @@
+name: Actualizar datos de TikTok
+
+on:
+  schedule:
+    # Corre cada 6 horas. La hora es en UTC, no en la hora de México.
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}
+    # ↑ Esto agrega un botón "Run workflow" para ejecutarlo manualmente
+    #   desde la pestaña Actions, útil para probar sin esperar el horario.
+
+permissions:
+  contents: write
+  # Necesario para que la Action pueda guardar los cambios de vuelta al repositorio.
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Leer datos públicos de TikTok
+        run: python scripts/update_tiktok_data.py
+
+      - name: Guardar cambios si hay datos nuevos
+        run: |
+          git config user.name "dimension-zombi-bot"
+          git config user.email "actions@github.com"
+          git add data/tiktok-data.json
+          git diff --cached --quiet && echo "Sin cambios, no hay nada que subir." || \
+            (git commit -m "Actualizar datos de TikTok automáticamente" && git push)
